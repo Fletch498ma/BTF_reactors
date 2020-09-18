@@ -1,0 +1,143 @@
+4/16/2013
+CREATE TABLE UCPC (
+	cpctime timestamp,
+	Record Text,
+	Mode NUMERIC,
+	Flags NUMERIC,
+	CN NUMERIC,
+	ST NUMERIC,
+	LT NUMERIC,
+	CNT NUMERIC,
+	PM NUMERIC,
+	RP NUMERIC);
+	
+4/15/2013
+\COPY api FROM 'API200AParsed.csv' (FORMAT CSV, HEADER TRUE);
+\COPY dusttrak FROM 'DustTrakParsed.csv' (FORMAT CSV, HEADER TRUE);
+\COPY gas FROM 'GasFlowParsed.csv' (FORMAT CSV, HEADER TRUE);
+\COPY metone FROM 'MetOneParsed.csv' (FORMAT CSV, HEADER TRUE);
+
+DELETE FROM api WHERE date(apitime) = '4/6/2013';
+DELETE FROM dusttrak WHERE date(dusttraktime) = '4/6/2013';
+DELETE FROM metone WHERE date(metonetime) = '4/6/2013';
+DELETE FROM teclog WHERE date(teclogtime) = '4/6/2013';
+DELETE FROM gas WHERE date(gastime) = '4/6/2013';
+
+SELECT
+	EXTRACT (EPOCH FROM metonetime) AS metonetime,
+	metone03
+FROM
+	metone
+WHERE
+	metonetime >= (
+		SELECT
+			starttime - interval '10 minutes'
+		FROM
+			experiments
+		WHERE
+			experiment = 1
+		)
+	AND
+	metonetime < (
+		SELECT
+			endtime + interval '10 minutes'
+		FROM
+			experiments
+		WHERE
+			experiment = 1
+		)
+ORDER BY
+	metonetime;
+	
+4/14/2013
+UPDATE experiments
+SET
+	endtime = '4/7/2013 14:25:35'
+WHERE experiment = 7;
+select * from experiments order by experiment;
+
+\COPY (SELECT * FROM experiments ORDER BY experiment) TO 'Experiments.csv' (FORMAT CSV, HEADER TRUE);
+
+ALTER TABLE metone DROP cooking;
+\COPY api FROM 'API200AParsed.csv' (FORMAT CSV, HEADER TRUE);
+\COPY dusttrak FROM 'DustTrakParsed.csv' (FORMAT CSV, HEADER TRUE);
+\COPY gas FROM 'GasFlowParsed.csv' (FORMAT CSV, HEADER TRUE);
+\COPY metone FROM 'MetOneParsed.csv' (FORMAT CSV, HEADER TRUE);
+
+DELETE FROM api WHERE date(apitime) = '4/7/2013';
+DELETE FROM dusttrak WHERE date(dusttraktime) = '4/7/2013';
+DELETE FROM metone WHERE date(metonetime) = '4/7/2013';
+DELETE FROM teclog WHERE date(teclogtime) = '4/7/2013';
+DELETE FROM gas WHERE date(gastime) = '4/7/2013';
+
+UPDATE experiments
+SET
+	type = 'Wok 2',
+	starttime = '2013-04-11 17:18:16',
+	endtime = '2013-04-11 17:19:30',
+	hood = 'Vent-A-Hood',
+	hoodstate = 'OFF',
+	food = 'Trader Joe''s Snow Peas (255 g)'
+WHERE experiment = 12;
+select * from experiments order by experiment;
+
+UPDATE experiments
+SET
+	experiment = 21
+WHERE experiment = 23;
+select * from experiments order by experiment;
+
+SELECT
+	min(apitime),
+	max(apitime)
+FROM
+	api
+WHERE
+	date(apitime) = '4/7/2013';
+
+
+select e.experiment, 
+	(
+		select avg(metone03) from metone m where m.metonetime >= e.starttime and m.metonetime < e.endtime
+	) as metone03,
+	(
+		select avg(metone05) from metone m where m.metonetime >= e.starttime and m.metonetime < e.endtime
+	) as metone05,
+	(
+		select avg(metone07) from metone m where m.metonetime >= e.starttime and m.metonetime < e.endtime
+	) as metone07,
+	(
+		select avg(metone1) from metone m where m.metonetime >= e.starttime and m.metonetime < e.endtime
+	) as metone1,
+	(
+		select avg(metone2) from metone m where m.metonetime >= e.starttime and m.metonetime < e.endtime
+	) as metone2,
+	(
+		select avg(metone5) from metone m where m.metonetime >= e.starttime and m.metonetime < e.endtime
+	) as metone5
+from experiments e where e.experiment > 14 order by e.experiment;
+
+select e.experiment,
+	(select avg(no) from api a where a.apitime >= e.starttime and a.apitime < e.endtime) as no,
+	(select avg(no2) from api a where a.apitime >= e.starttime and a.apitime < e.endtime) as no2,
+	(select avg(nox) from api a where a.apitime >= e.starttime and a.apitime < e.endtime) as nox
+from experiments e
+where e.experiment > 14
+order by e.experiment;
+
+select e.experiment,
+	(select avg(dtconc) from dusttrak d where d.dusttraktime >= e.starttime and d.dusttraktime < e.endtime) as dtconc
+from experiments e
+where e.experiment > 14
+order by e.experiment;
+
+select e.experiment,
+	(select avg(bd) from teclog a where a.teclogtime >= e.starttime and a.teclogtime < e.endtime) as bd,
+	(select avg(db) from teclog a where a.teclogtime >= e.starttime and a.teclogtime < e.endtime) as db,
+	(select avg(egm) from teclog a where a.teclogtime >= e.starttime and a.teclogtime < e.endtime) as egm
+from experiments e
+where e.experiment > 14
+order by e.experiment;
+
+
+	
