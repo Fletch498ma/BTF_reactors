@@ -39,4 +39,4 @@ nosetests.xml
 # Ignored files and directories
 backend/testingData
 log/
-PythonScripts/DAQ/Collected
+PythonScripts/DAQ
