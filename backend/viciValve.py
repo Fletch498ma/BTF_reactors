@@ -174,6 +174,7 @@ class ViciValve(ValveThread):
     def reset(self):
         if ser.is_open:
             ser.close()
+            self.valve_state = True
             print('closing port ' + valve_port + '...\n')
 
     

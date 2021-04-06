@@ -13,6 +13,7 @@ import serial
 from sys import stdout
 import pandas
 import numpy as np
+from threading import Event
 
 #phidget imports
 from Phidget22.Phidget import *
@@ -26,6 +27,7 @@ from analysis import Analysis
 from viciValveThread import *
 from dataservice import SensorReader,SerialSensorReader
 from dataservice import IRSensorReader, ECSensorReader
+from controlPhidgets import PhidgetSolidStateRelay_REL1101
 from dataPhidget import PhidgetHumiditySensor, PhidgetPressureSensor_1136, PhidgetThermocouple, PhidgetpHSensor_1130
 #In configuration file have sensors and associate log filenames
 #Have list of active sensors and directories for reading files.
@@ -33,7 +35,7 @@ from dataPhidget import PhidgetHumiditySensor, PhidgetPressureSensor_1136, Phidg
 CFGFILE="/home/pi/BTF_reactors/backend/backend.cfg"
 
 logdir="logs"
-session_id="testing2"
+session_id="testing"
 
 #state machine variables
 polling=True
@@ -55,15 +57,15 @@ addressMap = {
     'SMC_Valve_Port1Manifold':Address( 607325, 0, 1, False,None),
     'SMC_Valve_ViciCommon':Address( 607325, 0, 2, False,None),
     'SMC_Valve_Port3Manifold':Address( 607325, 0, 3, False,None),
-    'ElectroChemCell_Outlet':Address( 607325, 0, 4, False,None),
+    'SMC_Valve_Port4Manifold':Address( 607325, 0, 4, False,None),
     'SMC_Valve_Port5Manifold':Address( 607325, 0, 5, False,None),
-    'ElectroChemCell_Inlet_Manifold':Address( 607325, 0, 6, False,None),
+    'SMC_Valve_Port6Manifold':Address( 607325, 0, 6, False,None),
     'SMC_Valve_Port2Manifold':Address( 607325, 0, 7, False,None),
 #    None:Address( 607325, 0, 8, False ),
 #    None:Address( 607325, 0, 9, False ),
 #    None:Address( 607325, 0, 10, False ),
 #    None:Address( 607325, 0, 11, False ),
-    'ElectroChemCell_Inlet':Address( 607325, 0, 12, False,None),
+#    None:Address( 607325, 0, 12, False ),
     'SMC_Valve_R3SumpOutlet':Address( 607325, 0, 13, False,None),
     'SMC_Valve_R4SumpOutlet':Address( 607325, 0, 14, False,None),
     'SMC_Valve_R2SumpOutlet':Address( 607325, 0, 15, False,None),
@@ -75,18 +77,14 @@ addressMap = {
     'pH_Reactor2':Address( 611075, 0, 1, False,VoltageSensorType.SENSOR_TYPE_1130_PH),
     'pH_Reactor3':Address( 611075, 0, 2, False,VoltageSensorType.SENSOR_TYPE_1130_PH),
     'pH_Reactor4':Address( 611075, 0, 3, False,VoltageSensorType.SENSOR_TYPE_1130_PH),
-    'dP_Reactor1':Address( 611075, 0, 7, False,VoltageRatioSensorType.SENSOR_TYPE_1136),
-    'dP_Reactor2':Address( 611075, 0, 6, False,VoltageRatioSensorType.SENSOR_TYPE_1136),
-    'dP_Reactor3':Address( 611075, 0, 5, False,VoltageRatioSensorType.SENSOR_TYPE_1136),
-    'dP_Reactor4':Address( 611075, 0, 4, False,VoltageRatioSensorType.SENSOR_TYPE_1136),
     'K-Type_Incubator':Address( 611075, 1, 0, False,None),
     'K-Type_Reactor2':Address( 611075, 1, 1, False,None),
     'K-Type_Reactor3':Address( 611075, 1, 2, False,None),
     'K-Type_Reactor4':Address( 611075, 1, 3, False,None),
     'SMC_Valve_?1':Address( 611075, 5, 0, False,None),
-    'SMC_Valve_?2':Address( 611075, 5, 1, False,None),
-    'SMC_Valve_?3':Address( 611075, 5, 2, False,None),
-    'SMC_Valve_?4':Address( 611075, 5, 3, False,None),
+    'SMC_Valve_IncubatorR2':Address( 611075, 4, 1, False,None),
+    'SMC_Valve_IncubatorR3':Address( 611075, 4, 2, False,None),
+    'SMC_Valve_IncubatorR4':Address( 611075, 4, 3, False,None),
 }
 
         
@@ -111,7 +109,7 @@ def gettimestamp(timeformat=False):
         now = time.time()
     return(now)
     
-def mklogfile(reactor,sensorname,rowType,stream=None):
+def mklogfile(sensorname,rowType):
     if STDOUT:
         return(stdout)
     logdir = logDir()
@@ -124,13 +122,10 @@ def mklogfile(reactor,sensorname,rowType,stream=None):
     #Check if log file exists for reactor/sensorname/stream directory 
         #If yes, logpath is becomes most recent file date thats not full 
             #check if file is full 
-    if stream:
-        logpath = path.join(logdir,f"{reactor}/{stream}/{sensorname}/{gettimestamp(timeformat=True)}_{sensorname}.csv")#path.join(logdir,f"{sensorname}_{gettimestamp(timeformat=True)}.csv")
-    else:
-        logpath = path.join(logdir,f"{reactor}/{sensorname}/{gettimestamp(timeformat=True)}_{sensorname}.csv")
+    logpath = path.join(logdir,f"{sensorname}_{gettimestamp(timeformat=True)}.csv")#path.join(logdir,f"{reactor}/{sensorname}/{stream}/{gettimestamp()}.csv")
     with open(logpath,'w+') as log:
         w = csv.writer(log)
-        w.writerow(list(list(zip(*rowType))[0]))
+        w.writerow(list(list(zip(*(("Date",str),)+rowType)))[0])
         return log 
     
 def dataMerge(data,path,dataf,timer):
@@ -143,17 +138,15 @@ def dataMerge(data,path,dataf,timer):
              round(float(data['humidity'][1][3]),1),round(float(data['humidity'][1][4]),1),round(float(data['humidity'][0][3]),1),round(float(data['humidity'][0][4]),1),
              round(float(data['gas_pressure'][1][3]),4),round(float(data['gas_pressure'][1][4]),4),round(float(data['gas_pressure'][0][3]),4),round(float(data['gas_pressure'][0][4]),4),
              round(float(data['ph'][1][3]),3),round(float(data['ph'][1][4]),3),#round(float(data['ph'][0][3]),3),round(float(data['ph'][0][4]),3),
-             round(float(data['ktype'][1][3]),2),round(float(data['ktype'][1][4]),2),#,round(float(data['ktype'][0][3]),2),round(float(data['ktype'][0][4]),2)]
-             round(float(data['pressure_drop'][1][3]),4),round(float(data['pressure_drop'][1][4]),4)
-             ]
-             
+             round(float(data['ktype'][1][3]),2),round(float(data['ktype'][1][4]),2)]#,round(float(data['ktype'][0][3]),2),round(float(data['ktype'][0][4]),2)]
+    
     dataf = dataf.append(pandas.Series(merge,index=dataf.columns),ignore_index = True)
     #write df to csv if timer 
     if timer > 1000: #only write to final csv log if running valves for more than 20 min ~ 1000sec
         dataf.to_csv(path,mode='a',header=False,index=False)
     return dataf
 
-def main(reactor,inlet_time,outlet_time,thermocouple,pH,pressure_drop,e):
+def main(reactor,thermocouple,pH,e):
     global logdir
     logdir = logDir()
     if path.exists(CFGFILE):
@@ -167,14 +160,13 @@ def main(reactor,inlet_time,outlet_time,thermocouple,pH,pressure_drop,e):
     #print(sensors_present)
     db = sqlalchemy.create_engine("sqlite:///%s"%session_id,echo=True)
     sensors = {}
-    ReactorTable = {"Reactor1":np.array([1,5]),"Reactor2":np.array([2,6]),"Reactor3":np.array([3,7]),"Reactor4":np.array([4,8])} 
-    masterDir = {"Reactor1":'/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/Reactor1/master.csv',
-                 "Reactor2":'/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/Reactor2/master.csv',
-                 "Reactor3":'/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/Reactor3/master.csv',
-                 "Reactor4":'/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/Reactor4/master.csv'}
+    ReactorTable = {"Reactor2":np.array(['SMC_Valve_R2SumpOutlet',6,'SMC_Valve_IncubatorR2']),"Reactor3":np.array(['SMC_Valve_R3SumpOutlet',7,'SMC_Valve_IncubatorR3']),"Reactor4":np.array(['SMC_Valve_R4SumpOutlet',8,'SMC_Valve_IncubatorR4'])}
+    masterDir = {"Reactor2":'/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/Reactor2/sump/master_SumpRemoval.csv',
+                 "Reactor3":'/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/Reactor3/sump/master_SumpRemoval.csv',
+                 "Reactor4":'/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/Reactor4/sump/master_SumpRemoval.csv'}
     
-    cacheData = {'ir_ek2':[None,None],'ec_ek3':[None,None],'humidity':[None,None],'gas_pressure':[None,None],'ktype':[None,None],'ph':[None,None],'pressure_drop':[None,None]}
-    data = {'ir_ek2':[None,None],'ec_ek3':[None,None],'humidity':[None,None],'gas_pressure':[None,None],'ktype':[None,None],'ph':[None,None],'pressure_drop':[None,None]}#[None,None] position 0 = outlet and position 1 = inlet
+    cacheData = {'ir_ek2':[None,None],'ec_ek3':[None,None],'humidity':[None,None],'gas_pressure':[None,None],'ktype':[None,None],'ph':[None,None]}
+    data = {'ir_ek2':[None,None],'ec_ek3':[None,None],'humidity':[None,None],'gas_pressure':[None,None],'ktype':[None,None],'ph':[None,None]}#[None,None] position 0 = outlet and position 1 = inlet
     
     dmaster = {'TimeIndex':[],
                 'Date':[],
@@ -203,17 +195,14 @@ def main(reactor,inlet_time,outlet_time,thermocouple,pH,pressure_drop,e):
                 'pH':[],
                 'STD-pH':[],
                 'Sump Temperature (C)':[],
-                'STD-Sump Temp':[],
-                'Pressure Drop (kPa)':[],
-                'STD-Pressure Drop':[]
+                'STD-Sump Temp':[]
                }
     dfmaster = pandas.DataFrame(dmaster,columns=['TimeIndex','Date','Time','Inlet CH4(%v/v)','STD-InCH4','Outlet CH4(%v/v)','STD-OutCH4',
                                                  'Inlet CO2(%v/v)','STD-InCO2','Outlet CO2(%v/v)','STD-OutCO2',
                                                  'Inlet O2(%v/v)','STD-InO2','Outlet O2(%v/v)','STD-OutO2',
                                                  'Temperature (C)','Inlet RelativeHumidity(%)','STD-InletHumidity',
                                                  'Outlet RelativeHumidity(%)','STD-OutletHumidity','Inlet Pressure (kPa)','STD-InletPressure',
-                                                 'Outlet Pressure (kPa)','STD-OutletPressure','pH','STD-pH','Sump Temperature (C)','STD-Sump Temp',
-                                                 'Pressure Drop (kPa)','STD-Pressure Drop'])
+                                                 'Outlet Pressure (kPa)','STD-OutletPressure','pH','STD-pH','Sump Temperature (C)','STD-Sump Temp'])
     
     
     #cache dataframe acting as in-house python database to store data locally before analysis or averaging.
@@ -266,33 +255,53 @@ def main(reactor,inlet_time,outlet_time,thermocouple,pH,pressure_drop,e):
                 'pH':[]}
     dfpHData = pandas.DataFrame(dpH,columns=['TimeIndex','Date','Time','pH'])
     
-    
     for i in range(0,2):
-        x = None
         position = ReactorTable[reactor][i]
-        if position <= 4:
-            stream = 'Outlet'
-        else:
-            stream = 'Inlet'
+        incubatorSMCvalve = ReactorTable[reactor][2]
         irLogFile={}
         ecLogFile={}
         phLogFile={}
-        if i == 0:
-            timer=outlet_time
-        else:
-            timer=inlet_time
+        timer=3600
         
-        #valve move
-        curSensor = 'valve'
-        print(sensors_present.get(curSensor))
-        if sensors_present.get(curSensor):
-            commConfig = {'port':cfg.get('valve','port'),'timeout':cfg.getint('global','timeout'),'bytesize':8,'parity':'N'}
-            try:
-                v = ViciValve(commConfig=commConfig,sensorName='valve',position=position,wait=15)
-            except KeyboardInterrupt:
-                print("Exiting")
-            v.startValve()
-            v.stop()
+        if i == 0:
+            address1 = addressMap['SMC_Valve_Port5Manifold']
+            address2 = addressMap['SMC_Valve_ToGasSensors']
+            address3 = addressMap[position]
+            address4 = addressMap[incubatorSMCvalve]
+            
+            # open valve connecting manifold port 5 and valve connecting SMC manifold to sensors (blocking gas from vici common or alicat calibration gases)
+            smcValve5 = PhidgetSolidStateRelay_REL1101(commConfig=address1,sensorName='SMC Valve',threadName='SMC Valve_manifold port 5',eventType='open',event=e)
+            smcValveSensors = PhidgetSolidStateRelay_REL1101(commConfig=address2,sensorName='SMC Valve',threadName='SMC Valve_to gas sensors',eventType='open',event=e)
+            smcValveSump = PhidgetSolidStateRelay_REL1101(commConfig=address3,sensorName='SMC Valve',threadName='SMC Valve_reactor sump outlet',eventType='open',event=e)
+            smcValveIncubator = PhidgetSolidStateRelay_REL1101(commConfig=address4,sensorName='SMC Valve',threadName='SMC Valve_inlet reactor incubator',eventType='open',event=e)
+            
+            smcValve5.initDevice()
+            smcValveSensors.initDevice()
+            smcValveSump.initDevice()
+            smcValveIncubator.initDevice()
+            
+            smcValve5.connect(address1.channel)
+            smcValveSensors.connect(address2.channel)
+            smcValveSump.connect(address3.channel)
+            smcValveIncubator.connect(address4.channel)
+            
+            smcValve5.startThread()
+            smcValveSensors.startThread()
+            smcValveSump.startThread()
+            smcValveIncubator.startThread()
+            
+        if i == 1:
+            # vici valve move
+            curSensor = 'valve'
+            print(sensors_present.get(curSensor))
+            if sensors_present.get(curSensor):
+                commConfig = {'port':cfg.get('valve','port'),'timeout':cfg.getint('global','timeout'),'bytesize':8,'parity':'N'}
+                try:
+                    v = ViciValve(commConfig=commConfig,sensorName='valve',position=position,wait=15)
+                except KeyboardInterrupt:
+                    print("Exiting")
+                v.startValve()
+                v.stop()
         
         curSensor = 'ir_ek2'
         print(sensors_present.get(curSensor))
@@ -300,8 +309,8 @@ def main(reactor,inlet_time,outlet_time,thermocouple,pH,pressure_drop,e):
             commConfig = {'port':cfg.get(curSensor,'port'),'timeout':cfg.getint('global','timeout'),
                     'bytesize':8,'parity':'N'}
             rowType = (('Ref(pk-pkV)',int),('ChA(pk-pkV)',int),('ChB(pk-pkV)',int),('ChA(ppm)',int),('ChB(ppm)',int),('temperature',float),('Bulb(V)',int))
-            logFile = mklogfile(reactor,curSensor,(("TimeIndex",float),("Date",str),("Time",str),) + rowType ,stream=stream)#'/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/RawData/ir_ek2_2021-2-28.csv'
-            sensors[curSensor] = IRSensorReader(commConfig=commConfig,sensorName=curSensor,IRcache=dfIRData,threadName=curSensor,eventType='continuous_event',event=e,rowType=rowType,rateSec=1,avg=10,timer=timer,db=x,log=logFile.name)
+            logFile = '/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/RawData/sump/ir_ek2_2021-1-5.csv'#mklogfile(curSensor,rowType)#'/home/pi/BTF_reactors/PythonScripts/DAQ/Collected/GasData.csv'
+            sensors[curSensor] = IRSensorReader(commConfig=commConfig,sensorName=curSensor,IRcache=dfIRData,threadName=curSensor,eventType='continuous_event',event=e,rowType=rowType,rateSec=1,avg=10,timer=timer,db=None,log=logFile)
             sensors[curSensor].delimiterPattern = "\\S+"
             sensors[curSensor].delimiter = " "
             
@@ -311,8 +320,8 @@ def main(reactor,inlet_time,outlet_time,thermocouple,pH,pressure_drop,e):
             commConfig = {'port':cfg.get(curSensor,'port'),'timeout':cfg.getint('global','timeout'),
                     'bytesize':8,'parity':'N'}
             rowType = (('Bias(mV)',int),('Concentration(ppm*100)',int),('OutputCurrent(nA)',int),('EC_SpanConcentration(ppm*100)',int),('SpanCurrent(nA)',int),('temperature',float)) #,('CurrentRange(nA)',str),('Range',str))
-            logFile = mklogfile(reactor,curSensor,(("TimeIndex",float),("Date",str),("Time",str),) + rowType ,stream=stream)#'/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/RawData/ec_ek3_2021-2-28.csv'#mklogfile(curSensor,rowType)#'/home/pi/BTF_reactors/PythonScripts/DAQ/Collected/O2Data.csv'
-            sensors[curSensor] = ECSensorReader(commConfig=commConfig,sensorName=curSensor,ECcache=dfECData,threadName=curSensor,eventType='continuous_event',event=e,rowType=rowType,rateSec=1,avg=10,timer=timer,db=x,log=logFile.name)
+            logFile = '/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/RawData/sump/ec_ek3_2021-1-5.csv'#mklogfile(curSensor,rowType)#'/home/pi/BTF_reactors/PythonScripts/DAQ/Collected/O2Data.csv'
+            sensors[curSensor] = ECSensorReader(commConfig=commConfig,sensorName=curSensor,ECcache=dfECData,threadName=curSensor,eventType='continuous_event',event=e,rowType=rowType,rateSec=1,avg=10,timer=timer,db=None,log=logFile)
             sensors[curSensor].delimiterPattern = "\\S+"
             sensors[curSensor].delimiter = " "
             
@@ -321,8 +330,8 @@ def main(reactor,inlet_time,outlet_time,thermocouple,pH,pressure_drop,e):
         if sensors_present.get(curSensor):
             commConfig = addressMap['HumiditySensor']
             rowType = (('RelativeHumidity(%)',float),)
-            logFile = mklogfile(reactor,curSensor,(("TimeIndex",float),("Date",str),("Time",str),) + rowType ,stream=stream)#'/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/RawData/humidity_2021-2-28.csv'#mklogfile(curSensor,rowType)#'/home/pi/BTF_reactors/PythonScripts/DAQ/Collected/O2Data.csv'
-            sensors[curSensor] = PhidgetHumiditySensor(commConfig=commConfig,sensorName=curSensor,Humcache=dfHumData,threadName=curSensor,eventType='continuous_event',event=e,rowType=rowType,rateSec=1,avg=10,timer=timer,db=x,log=logFile.name)
+            logFile = '/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/RawData/sump/humidity_2021-1-5.csv'#mklogfile(curSensor,rowType)#'/home/pi/BTF_reactors/PythonScripts/DAQ/Collected/O2Data.csv'
+            sensors[curSensor] = PhidgetHumiditySensor(commConfig=commConfig,sensorName=curSensor,Humcache=dfHumData,threadName=curSensor,eventType='continuous_event',event=e,rowType=rowType,rateSec=1,avg=10,timer=timer,db=None,log=logFile)
             sensors[curSensor].delimiterPattern = "\\S+"
             sensors[curSensor].delimiter = " "
         
@@ -331,28 +340,8 @@ def main(reactor,inlet_time,outlet_time,thermocouple,pH,pressure_drop,e):
         if sensors_present.get(curSensor):
             commConfig = addressMap['DifPressureSensor_Max2kPa']
             rowType = (('Differential Pressure(kPa)',float),)
-            logFile = mklogfile(reactor,curSensor,(("TimeIndex",float),("Date",str),("Time",str),) + rowType ,stream=stream)#'/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/RawData/gas_Pressure_2021-2-28.csv'#mklogfile(curSensor,rowType)#'/home/pi/BTF_reactors/PythonScripts/DAQ/Collected/O2Data.csv'
-            sensors[curSensor] = PhidgetPressureSensor_1136(commConfig=commConfig,sensorName=curSensor,PresCache=dfPresData,threadName=curSensor,eventType='continuous_event',event=e,rowType=rowType,rateSec=1,avg=10,timer=timer,db=x,log=logFile.name)
-            sensors[curSensor].delimiterPattern = "\\S+"
-            sensors[curSensor].delimiter = " "
-        
-        curSensor = 'pressure_drop'
-        print(sensors_present.get(curSensor))
-        if sensors_present.get(curSensor):
-            commConfig = addressMap[pressure_drop]
-            rowType = (('Differential Pressure(kPa)',float),)
-            logFile = mklogfile(reactor,curSensor,(("TimeIndex",float),("Date",str),("Time",str),) + rowType )#'/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/RawData/pressure_drop_2021-2-28.csv'#mklogfile(curSensor,rowType)#'/home/pi/BTF_reactors/PythonScripts/DAQ/Collected/O2Data.csv'
-            sensors[curSensor] = PhidgetPressureSensor_1136(commConfig=commConfig,sensorName=curSensor,PresCache=dfPresData,threadName=curSensor,eventType='continuous_event',event=e,rowType=rowType,rateSec=1,avg=10,timer=timer,db=x,log=logFile.name)
-            sensors[curSensor].delimiterPattern = "\\S+"
-            sensors[curSensor].delimiter = " "
-            
-        curSensor = 'ph'
-        print(sensors_present.get(curSensor))
-        if sensors_present.get(curSensor):
-            commConfig = addressMap[pH]
-            rowType = (('pH',float),)
-            logFile = mklogfile(reactor,curSensor,(("TimeIndex",float),("Date",str),("Time",str),) + rowType )#'/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/RawData/pH_2021-2-28.csv'#mklogfile(curSensor,rowType)#'/home/pi/BTF_reactors/PythonScripts/DAQ/Collected/O2Data.csv'
-            sensors[curSensor] = PhidgetpHSensor_1130(commConfig=commConfig,sensorName=curSensor,pHCache=dfpHData,threadName=curSensor,eventType='continuous_event',event=e,rowType=rowType,rateSec=1,avg=10,timer=timer,db=x,log=logFile.name)
+            logFile = '/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/RawData/sump/diffPressure_2021-1-5.csv'#mklogfile(curSensor,rowType)#'/home/pi/BTF_reactors/PythonScripts/DAQ/Collected/O2Data.csv'
+            sensors[curSensor] = PhidgetPressureSensor_1136(commConfig=commConfig,sensorName=curSensor,PresCache=dfPresData,threadName=curSensor,eventType='continuous_event',event=e,rowType=rowType,rateSec=1,avg=10,timer=timer,db=None,log=logFile)
             sensors[curSensor].delimiterPattern = "\\S+"
             sensors[curSensor].delimiter = " "
             
@@ -361,11 +350,21 @@ def main(reactor,inlet_time,outlet_time,thermocouple,pH,pressure_drop,e):
         if sensors_present.get(curSensor):
             commConfig = addressMap[thermocouple]
             rowType = (('Temperature (C)',float),)
-            logFile = mklogfile(reactor,curSensor,(("TimeIndex",float),("Date",str),("Time",str),) + rowType )#'/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/RawData/SumpTemperature_2021-2-28.csv'#mklogfile(curSensor,rowType)#'/home/pi/BTF_reactors/PythonScripts/DAQ/Collected/O2Data.csv'
-            sensors[curSensor] = PhidgetThermocouple(commConfig=commConfig,sensorName=curSensor,TempCache=dfTempData,threadName=curSensor,eventType='continuous_event',event=e,rowType=rowType,rateSec=1,avg=10,timer=timer,db=x,log=logFile.name)
+            logFile = '/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/RawData/sump/SumpTemperature_2021-1-5.csv'#mklogfile(curSensor,rowType)#'/home/pi/BTF_reactors/PythonScripts/DAQ/Collected/O2Data.csv'
+            sensors[curSensor] = PhidgetThermocouple(commConfig=commConfig,sensorName=curSensor,TempCache=dfTempData,threadName=curSensor,eventType='continuous_event',event=e,rowType=rowType,rateSec=1,avg=10,timer=timer,db=None,log=logFile)
             sensors[curSensor].delimiterPattern = "\\S+"
             sensors[curSensor].delimiter = " "
            
+        curSensor = 'ph'
+        print(sensors_present.get(curSensor))
+        if sensors_present.get(curSensor):
+            commConfig = addressMap[pH]
+            rowType = (('pH',float),)
+            logFile = '/media/pi/One Touch/Seagate/raspberrypi/Biotrickling_filter_data/log2021/RawData/sump/pH_2021-1-5.csv'#mklogfile(curSensor,rowType)#'/home/pi/BTF_reactors/PythonScripts/DAQ/Collected/O2Data.csv'
+            sensors[curSensor] = PhidgetpHSensor_1130(commConfig=commConfig,sensorName=curSensor,pHCache=dfpHData,threadName=curSensor,eventType='continuous_event',event=e,rowType=rowType,rateSec=1,avg=10,timer=timer,db=None,log=logFile)
+            sensors[curSensor].delimiterPattern = "\\S+"
+            sensors[curSensor].delimiter = " "
+            
         try:
             for name,sensor in sensors.items():
                 sensor.startCollection() #starting teach sensor connection in separate threads
@@ -377,7 +376,19 @@ def main(reactor,inlet_time,outlet_time,thermocouple,pH,pressure_drop,e):
             data[name][i] = output[0] #averaged and analysed data with header
             cacheData[name][i] = output[1] #raw data frame 
             print(data)
-    
+        
+        if i == 0:
+            # close all open valves
+            smcValveSump._closeValve(e)
+            smcValve5._closeValve(e)
+            smcValveSensors._closeValve(e)
+            smcValveIncubator._closeValve(e)
+            # stop all open threads
+            smcValveSump.stopThread()
+            smcValve5.stopThread()
+            smcValveSensors.stopThread()
+            smcValveIncubator.stopThread()
+        
     merged = dataMerge(data,masterDir[reactor],dfmaster,timer)
     return merged
 

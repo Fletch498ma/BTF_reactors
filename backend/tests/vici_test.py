@@ -1,8 +1,8 @@
 import time
 from viciValve import ViciValve
 
-seq = [2,3,4,1]
-delta = 10000
+seq = [1,5,2,6,3,7,4,8]
+delta = 120
 experimentRun= True
 
 def start():

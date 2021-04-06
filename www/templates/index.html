@@ -1,0 +1,155 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Particle Camp</title>
+
+<style>
+  body {
+    font-family: "HelveticaNeue-Light",
+                 "Helvetica Neue Light",
+                 "Helvetica Neue",
+                 Helvetica,
+                 Arial,
+                 "Lucida Grande",
+                 sans-serif; 
+    font-weight: 300;
+  }
+
+  #ul-box {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 50%;
+    bottom: 50%;
+    margin: 0;
+    padding: 0;
+    background: red;
+  }
+
+  #ur-box {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    right: 0;
+    bottom: 50%;
+    margin: 0;
+    padding: 0;
+    background: blue;
+  }
+
+  #ll-box {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 50%;
+    bottom: 0;
+    margin: 0;
+    padding: 0;
+    background: yellow;
+  }
+
+  #lr-box {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    right: 0;
+    bottom: 0;
+    margin: 0;
+    padding: 0;
+    background: green;
+  }
+
+  svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  .axis path,
+  .axis line {
+    fill: none;
+    stroke: #000;
+    stroke-width: 1px;
+    shape-rendering: crispEdges;
+  }
+
+  .line {
+    fill: none;
+    stroke: white;
+    stroke-width: 3px;
+  }
+</style>
+
+<!--<script src="static/jquery/jquery-2.0.2.js"></script>-->
+<script src="static/d3/d3.v3.js"></script>
+
+<body>
+  <div id="ul-box"></div>
+  <div id="ur-box"></div>
+  <div id="ll-box"></div>
+  <div id="lr-box"></div>
+</body>
+
+<script>
+  function compose(f, g) { return function(x) { return f(g(x)); }; }
+  function dataSize(d) { return d.size; }
+  function dataFreq(d) { return d.freq; }
+
+  var margin = {top: 20, right: 80, bottom: 30, left: 50},
+      width = 1000 - margin.left - margin.right,
+      height = 1000 - margin.top - margin.bottom;
+
+  var xScale = d3.scale.linear()
+      .range([0, width]);
+
+  var yScale = d3.scale.linear()
+      .range([height, 0]);
+
+  var xAxis = d3.svg.axis()
+      .scale(xScale)
+      .orient("bottom");
+
+  var yAxis = d3.svg.axis()
+      .scale(yScale)
+      .orient("left");
+
+  var line = d3.svg.line()
+      .x(compose(xScale, dataSize))
+      .y(compose(yScale, dataFreq));
+
+  var svg = d3.select("#ul-box").append("svg")
+      .attr("viewBox", "0 0 1000 1000")
+      .attr("preserveAspectRatio", "none")
+    .append("g")
+      .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+  function draw(data) {
+    xScale.domain([0, d3.max(data, dataSize)]);
+    yScale.domain([0, d3.max(data, dataFreq)]);
+
+    svg.append("g")
+        .attr("class", "x axis")
+        .attr("transform", "translate(0," + height + ")")
+        .call(xAxis)
+      .append("text")
+        .attr("x", 6)
+        .attr("dx", ".71em")
+        .style("text-anchor", "start")
+        .text("Particle Size");
+
+    svg.append("g")
+        .attr("class", "y axis")
+        .call(yAxis)
+      .append("text")
+        .attr("transform", "rotate(-90)")
+        .attr("y", 6)
+        .attr("dy", ".71em")
+        .style("text-anchor", "end")
+        .text("Frequency (PPM)");
+
+    svg.append("path")
+        .datum(data)
+        .attr("class", "line")
+        .attr("d", line);
+  }
+
+  d3.json("data", draw);
+</script>

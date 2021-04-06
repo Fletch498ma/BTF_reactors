@@ -1,2 +1,12 @@
-Add reset routine if the thing keeps on timing out
-Add live view of reading rows
+Add Alicat thread protocol to dataservice
+	-copy serial protocol
+	-utility functions (getflow,change flow,change pid, etc...)
+	-custom thread run() functions (how to manage sensor initialization??)
+
+Add analog output DAQ thread protocol to dataservice
+	-copy uldaq protocol for connecting to daq unit
+	-utility functions (getvoltage,changevoltage,etc...)
+	-custom thread run funcs
+
+Add IR/O2 gas sensor functions to dataservice for changing calibration parms,zeroing,spanning,etc...
+Add custom thread functions in IR/O2 gas sensors specific for recalibration 
